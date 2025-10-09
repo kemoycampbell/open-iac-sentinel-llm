@@ -1,0 +1,19 @@
+llm:
+  provider: str
+  model: str
+  endpoint: str
+  api_key_env_var: str
+
+watch:
+  environments:
+    type: list
+    items:
+      name: str
+      paths: list
+
+drift_detection:
+  interval_seconds: int
+
+output:
+  log_level: str
+  log_file: str
