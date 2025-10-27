@@ -1,3 +1,4 @@
 .dist
 _pytest_cache
 __pycache__
+output_json_sample.json
