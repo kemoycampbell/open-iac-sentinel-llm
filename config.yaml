@@ -1,8 +1,8 @@
 # LLM configuration
 llm:
   provider: ollama
-  model: qwen
-  endpoint: http://localhost:11434
+  model: qwen3-coder
+  endpoint: http://localhost:11434/v1
   api_key_env_var: OLLAMA_API_KEY
 
 # Watch configuration
@@ -10,26 +10,16 @@ watch:
   environments:
     - name: production
       paths:
-        - ./terraform/production/vms
-        - ./terraform/production/networking
+        - C:/Users/kscics/Desktop/engineering-cloud-software-system/docker-wp
       resources:
         includes:
           - aws_instance.web_server
           - aws_vpc_*
         excludes:
           - aws_instance.db_server
-    - name: staging
-      paths:
-        - ./terraform/staging/*
-      resources:
-        includes:
-          - aws_instance.staging_web
-          - aws_vpc_staging_*
-        excludes:
-          - aws_instance.db_server
 # Drift configuration
 drift_detection:
-  interval_seconds: 300
+  interval_seconds: 30
 
 # Output configuration
 output:

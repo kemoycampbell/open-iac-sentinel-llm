@@ -119,8 +119,9 @@ class Config:
 
     @property
     def environments(self) -> dict:
-        return self._config.get('environments')
+        return self._config.get('watch')
 
     @property
     def drift_detection(self) -> dict:
         return self._config.get('drift_detection')
+
