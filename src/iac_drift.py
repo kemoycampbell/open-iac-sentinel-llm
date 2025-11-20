@@ -5,16 +5,19 @@ from config.config import Config
 from detect_engine.detect_engine import DriftDectionEngine
 from llm.llm import LLM
 import time
+import json
 
 
 #loading the config
 config_path = "../config.yaml"
 schema_path = "../required_schema.yaml"
+dotenv_path = "../.env"
 
-config = Config(config_path, schema_path)
+config = Config(config_path, schema_path, dotenv_path)
 config.load()
 watch = config.environments
 drift_interval = config.drift_detection.get('interval_seconds')
+
 
 #Drift detction engine
 paths = watch.get('environments')
@@ -23,7 +26,7 @@ drift_detection_engine = DriftDectionEngine(paths=paths, terraform_variant="terr
 #llm config
 model = config.llm.get('model')
 ollama_endpoint = config.llm.get('endpoint')
-api_key = 'fake_api_key'  # Replace with actual key retrieval method
+api_key = config.llm_api_key
 
 print(f"Using LLM model: {model}")
 print(f"Using LLM endpoint: {ollama_endpoint}")
@@ -32,7 +35,8 @@ print(f"Using LLM endpoint: {ollama_endpoint}")
 template_paths = {
     "iac_drift_expert": "llm/iac_drift_template.yaml",
     "iac_drift_expert_second_pass": "llm/iac_drift_template_second_pass.yaml",
-    "iac_drift_patch_expert": "llm/iac_drift_patch_template.yaml"
+    "iac_drift_patch_expert": "llm/iac_drift_patch_template.yaml",
+    "iac_drift_pr_expert": "llm/iac_drift_pr_template.yaml",
 }
 
 templates = {}
@@ -76,17 +80,32 @@ while True:
             )
 
             #loop through the recommendations - right now the recommendations is a stringified list
+            print(refined_recommendations)
             refined_recommendations_list = yaml.safe_load(refined_recommendations)
 
             for recommendation in refined_recommendations_list:
                 if recommendation.get('fix_type') == 'code_patch':
                     print(f"Generating code update patch for {environment} at path {path}...")
-                    response = llm.fix_drift_patch(model=model, recommendation=recommendation, directory=path)
-                    print(f"Generated Patch: {response}")
+                    patch = llm.fix_drift_patch(model=model, recommendation=recommendation, directory=path)
+                    print(f"Generated Patch: {patch}")
 
                     #refresh the terraform after applying the patch
                     print(f"Applying generated patch to files...")
                     drift_detection_engine.refresh_terraform_state(path)
+                    print(f"Patch is {patch}")
+                    patch_json = json.loads(patch)
+                    modified_files = patch_json.get('modified_files', [])
+                    if modified_files:
+                        print("Generating Github PR for the applied patch...")
+                        pr_response = llm.make_drift_pr(
+                            model = model,
+                            recommendation = recommendation,
+                            directory = path,
+                            modified_files = modified_files,
+                            token = config.github_token
+                        )
+
+                        print(f"PR Response: {pr_response}")
 
             print(f"Refined Recommendations for environment '{environment}' at path '{path}':")
             print(refined_recommendations)
@@ -94,4 +113,6 @@ while True:
     print(f"Waiting for {drift_interval} seconds before next drift check...")
 
     time.sleep(drift_interval)
+
+
 

@@ -1,9 +1,9 @@
 # LLM configuration
 llm:
   provider: ollama
-  model: qwen3-coder
+  model: qwen3-coder:latest
   endpoint: http://localhost:11434/v1
-  api_key_env_var: OLLAMA_API_KEY
+  api_key_env_var: LLM_API_KEY
 
 # Watch configuration
 watch:

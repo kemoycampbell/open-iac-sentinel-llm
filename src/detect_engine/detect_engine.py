@@ -89,13 +89,3 @@ class DriftDectionEngine:
             raise RuntimeError(f"Terraform refresh failed with error: {refresh.stderr}")
         
         return refresh.stdout
-    
-
-
-#testing
-
-# master_plan = DriftDectionEngine()
-# path = '/home/cypher/Desktop/engineering-cloud-software-system/docker-wp'
-# drift_result = master_plan.run_terraform_plan(path)
-
-# print(drift_result)

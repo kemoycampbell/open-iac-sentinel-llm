@@ -1,10 +1,13 @@
+import os
 import yaml
 from pathlib import Path
+from dotenv import load_dotenv
 
 class Config:
-    def __init__(self, config_path: str, required_schema_path: str):
+    def __init__(self, config_path: str, required_schema_path: str, dotenv_path: str):
         self.config_path = Path(config_path)
         self.required_schema_path = Path(required_schema_path)
+        self.dotenv_path = dotenv_path
 
         if not self.config_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -17,6 +20,7 @@ class Config:
     def load(self):
         self._config = self._open_yaml(self.config_path)
         self.required_schema = self._open_yaml(self.required_schema_path)
+        load_dotenv(self.dotenv_path)
         self.validate_config(self.required_schema, self._config)
 
     def _open_yaml(self, path: Path) -> dict:
@@ -124,4 +128,12 @@ class Config:
     @property
     def drift_detection(self) -> dict:
         return self._config.get('drift_detection')
+    
+    @property
+    def github_token(self)-> str:
+        return os.getenv('GITHUB_TOKEN')
+    @property
+    def llm_api_key(self) -> str:
+        env_key = self.llm.get('api_key_env_var')
+        return os.getenv(env_key)
 

@@ -25,5 +25,3 @@ def discover_terraform_files(directory):
                         resource_map[file_path] = resources
     return {"resource_map": resource_map}
 
-
-print(json.dumps(discover_terraform_files('C:/Users/kscics/Desktop/engineering-cloud-software-system/docker-wp'), indent=2))

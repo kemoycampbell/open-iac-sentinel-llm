@@ -7,6 +7,7 @@ import os
 
 from tools.apply_patch import *
 from tools.discover_resource_files import *
+from tools.github import *
 
 class LLM:
     def __init__(self, api_endpoint: str, api_key: str, prompt_templates:dict):
@@ -58,6 +59,106 @@ class LLM:
         prompt = self.format_prompt_with_template("iac_drift_expert_second_pass",placeholders)
         return self.chat(model=model, messages=prompt)
     
+    def execute_tool_calls(self, tool_calls, tool_maps: dict, execute_calls_ids,execute_step, messages):
+        for i, call in enumerate(tool_calls):
+            # parse out the info from the tool call
+            name = call.function.name
+            args = json.loads(call.function.arguments)
+            key = call.id  # use call.id to prevent duplicate execution
+
+            # skip already executed calls
+            if key in execute_calls_ids or name in execute_step:
+                continue
+
+            # mark the call as executed
+            execute_calls_ids.add(key)
+            execute_step.add(name)
+
+            # --- DEBUGGING: show model's tool call request ---
+            print(f"\n=== TOOL CALL {i+1} ===")
+            print(f"Tool ID: {call.id}")
+            print(f"Tool Name: {name}")
+            print(f"Tool Args: {args}")
+            print("\nCurrent messages before tool execution:")
+            for msg in messages:
+                print(msg)
+            print("\n---------------------------\n")
+
+            # map tools to actual functions
+            func = tool_maps.get(name)
+            if func:
+                try:
+                    result = func(**args)
+                    if not result:
+                        result = {"status": "ok"}  # indicate success for void functions
+                except Exception as e:
+                    result = {"error": f"Tool {name} failed with args: {args} with error: {str(e)}"}
+            else:
+                result = {"error": "Tool not recognized."}
+
+            # --- DEBUGGING: show tool execution result ---
+            print(f"Tool Execution Result for {name}:")
+            print(json.dumps(result, indent=2))
+
+            # append tool result with proper tool_call_id
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps(result, indent=2)
+            })
+
+            # --- DEBUGGING: show what the model sees after tool append ---
+            print(f"Tool message appended to messages for {name}:")
+            print(messages[-1])
+            print("\n===========================\n")
+        return messages
+
+            
+
+
+
+
+
+    
+    def make_drift_pr(self,model, recommendation: str, directory:str, token:str, modified_files: list):
+        placeholders = {
+            "recommendation": recommendation,
+            "directory": directory,
+            "token": token,
+            "modified_files": modified_files
+        }
+
+        tools = self.register_PR_tools()
+        prompt = self.format_prompt_with_template("iac_drift_pr_expert", placeholders)
+
+        executed_calls = set()  # Keep track of executed tool call IDs
+        executed_steps = set()  # Keep track of executed tool call names
+
+        #create a map of the tools name based on their functions
+        tool_maps = {
+            "list_drifted_prs": list_drifted_prs,
+            "stage_change": stage_change,
+            "commit_change": commit_change,
+            "push_change": push_change,
+            "find_main_branch": find_main_branch,
+            "find_repo_name_and_owner": find_repo_name_and_owner,
+            "create_branch": create_branch,
+            "delete_branch": delete_branch,
+            "create_pr": create_pr
+        }
+
+        while True:
+            message, tool_calls = self.chat(model=model, messages=prompt, tools=tools)
+            #print("LLM Message:", message)
+
+            # No more tool calls? return the LLM's final response
+            if not tool_calls:
+                return message.content
+            # Execute all tool calls
+            prompt = self.execute_tool_calls(tool_calls, tool_maps, executed_calls, executed_steps, prompt)
+
+    
+    
     def fix_drift_patch(self, model, recommendation, directory:str):
         placeholders = {
             "recommendation": recommendation,
@@ -67,50 +168,28 @@ class LLM:
         prompt = self.format_prompt_with_template("iac_drift_patch_expert", placeholders)
 
         executed_call_ids = set()  # Keep track of executed tool call IDs
+        executed_steps = set()
 
-        # Loop to handle multiple tool calls sequentially
+        #tool mapping
+        tool_maps = {
+            "discover_terraform_files": discover_terraform_files,
+            "read_file": read_file,
+            "write_file": write_file
+        }
+
         while True:
             message, tool_calls = self.chat(model=model, messages=prompt, tools=tools)
+            print("\n\nLLM Message all :", message)
 
             # No more tool calls? return the LLM's final response
             if not tool_calls:
                 return message.content
 
             # Execute all tool calls
-            for call in tool_calls:
-                # Skip already executed calls
-                if call.id in executed_call_ids:
-                    continue
-
-                print(f"Call: {call.function.name}, Args: {call.function.arguments}")
-                name = call.function.name
-                args = json.loads(call.function.arguments)
-                print(f"Executing tool call: {name} with args: {args}")
-
-                # Map tools to actual functions
-                if name == "discover_terraform_files":
-                    result = discover_terraform_files(**args)
-                elif name == "read_file":
-                    result = read_file(**args)
-                elif name == "write_file":
-                    write_file(**args)
-                    result = {"status": "ok"}  # indicate write succeeded
-                else:
-                    result = {"error": "Tool not recognized."}
-
-                # Append tool result with proper tool_call_id
-                prompt.append({
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "content": json.dumps(result, indent=2)
-                })
-
-                # Mark call as executed to avoid re-executing
-                executed_call_ids.add(call.id)
-    
+            prompt = self.execute_tool_calls(tool_calls, tool_maps, executed_call_ids, executed_steps, prompt)
 
     
-    def chat(self, model, messages, tools: list = None, tool_choice:str="auto"):
+    def chat(self, model, messages, tools: list = None, tool_choice:str="required"):
         if tools:
             response = self.client.chat.completions.create(
                 model=model,
@@ -175,281 +254,162 @@ class LLM:
                 }
             }
         ]
-
-
-
-
-# # load in the drift json file
-# filename = "drift.json"
-
-# with open(filename, "r") as f:
-#     raw = f.read()
-#     try:
-#         drift_data = json.loads(raw)  # Try proper JSON first
-#     except json.JSONDecodeError:
-#         drift_data = ast.literal_eval(raw)  # Fallback for Python dict
     
-#     #drift_data = drift_data.get('resource_drift', [])
-
-# #selected only the resources drifted from the prior state
-# resource_drifts = drift_data.get('resource_drift', [])
-
-# prior_states = drift_data.get('prior_state')['values']['root_module']['resources']
-# # print("prior_states loaded:", prior_states)
-# # exit(0)
-
-# #get the prior resources that match the drifted resources
-# selected_prior_states = []
-# for resource in resource_drifts:
-#     address = resource.get('address')
-#     for prior in prior_states:
-#         if prior.get('address') == address:
-#             selected_prior_states.append(prior)
-#             break
-
-
-
-
-
-
-# prompt_templates = {}
-# prompt_template_filename = "iac_drift_template.yaml"
-# with open(prompt_template_filename, "r") as f:
-#     prompt_template = yaml.safe_load(f)
-#     prompt_templates["iac_drift_expert"] = prompt_template
-
-# with open("iac_drift_template_second_pass.yaml", "r") as f:
-#     prompt_template = yaml.safe_load(f)
-#     prompt_templates["iac_drift_expert_second_pass"] = prompt_template
-
-
-# #print("Prompt Template Loaded:", prompt_template)
-
-# ollama_endpoint = "http://localhost:11434/v1"
-# api_key = "fake_api_key_for_ollama"
-# llm = LLM(ollama_endpoint, api_key, prompt_templates=prompt_templates)
-
-# #model = "llama3.1:latest"
-# #model = "gpt-oss:20b"
-# model = "qwen3-coder"
-
-# #import the config from 1 directory up
-# ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-# Config_path = os.path.join(ROOT_DIR, "config.yaml")
-# schema = os.path.join(ROOT_DIR, "required_schema.yaml")
-# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-# #print("Config Path:", Config_path)
-# from config.config import Config
-# config = Config(Config_path, schema)
-# config.load()
-
-# watch = config.environments
-# formatted_prompt = llm.format_prompt_with_template(
-#     current_chunk=drift_data,
-#     watch=watch,
-#     previous_chunk={}
-# )
-# response = llm.chat(model=model, messages=formatted_prompt)
-# print("LLM Response:")
-# print(response)
-
-# print(drift_data.get('prior_state')['values']['root_module'])
-# exit(0)
-
-# drift_data = [
-#   {
-#     "address": "module.web.aws_instance.web_server",
-#     "mode": "managed",
-#     "type": "aws_instance",
-#     "name": "web_server",
-#     "provider_name": "registry.opentofu.org/hashicorp/aws",
-#     "change": {
-#       "actions": ["update"],
-#       "before": {
-#         "ami": "ami-0abc12345",
-#         "instance_type": "t2.micro",
-#         "tags": {
-#           "Environment": "staging"
-#         },
-#         "vpc_security_group_ids": ["sg-00112233"],
-#         "key_name": "old-key"
-#       },
-#       "after": {
-#         "ami": "ami-0def67890",
-#         "instance_type": "t2.small",
-#         "tags": {
-#           "Environment": "staging",
-#           "Owner": "DevOpsTeam"
-#         },
-#         "vpc_security_group_ids": ["sg-00112233", "sg-44556677"],
-#         "key_name": "new-key"
-#       },
-#       "after_unknown": {},
-#       "before_sensitive": {},
-#       "after_sensitive": {}
-#     }
-#   },
-#   {
-#     "address": "aws_security_group.db",
-#     "mode": "managed",
-#     "type": "aws_security_group",
-#     "name": "db",
-#     "provider_name": "registry.opentofu.org/hashicorp/aws",
-#     "change": {
-#       "actions": ["update"],
-#       "before": {
-#         "ingress": [
-#           {
-#             "from_port": 3306,
-#             "to_port": 3306,
-#             "protocol": "tcp",
-#             "cidr_blocks": ["10.0.0.0/24"]
-#           }
-#         ],
-#         "tags": {
-#           "Environment": "production"
-#         }
-#       },
-#       "after": {
-#         "ingress": [
-#           {
-#             "from_port": 3306,
-#             "to_port": 3306,
-#             "protocol": "tcp",
-#             "cidr_blocks": ["10.0.0.0/16"]
-#           },
-#           {
-#             "from_port": 5432,
-#             "to_port": 5432,
-#             "protocol": "tcp",
-#             "cidr_blocks": ["10.0.1.0/24"]
-#           }
-#         ],
-#         "tags": {
-#           "Environment": "production",
-#           "Owner": "DBTeam"
-#         }
-#       },
-#       "after_unknown": {},
-#       "before_sensitive": {},
-#       "after_sensitive": {}
-#     }
-#   }
-# ]
-
-# drift_data = [
-#     {
-#         "address": "aws_s3_bucket.untracked_bucket",
-#         "mode": "managed",
-#         "type": "aws_s3_bucket",
-#         "name": "untracked_bucket",
-#         "provider_name": "registry.opentofu.org/hashicorp/aws",
-#         "change": {
-#             "actions": ["create"],
-#             "before": None,
-#             "after": {
-#                 "bucket": "untracked-bucket-prod",
-#                 "acl": "private",
-#                 "versioning": {"enabled": True},
-#                 "tags": {"Environment": "Production", "Owner": "DevOpsTeam"},
-#                 "region": "us-east-1"
-#             },
-#             "after_unknown": {"arn": True, "id": True}
-#         },
-#         "after_sensitive": {},
-#         "before_sensitive": {}
-#     },
-#     {
-#         "address": "aws_instance.orphan_instance",
-#         "mode": "managed",
-#         "type": "aws_instance",
-#         "name": "orphan_instance",
-#         "provider_name": "registry.opentofu.org/hashicorp/aws",
-#         "change": {
-#             "actions": ["create"],
-#             "before": None,
-#             "after": {
-#                 "ami": "ami-0abcdef1234567890",
-#                 "instance_type": "t2.medium",
-#                 "tags": {"Environment": "Staging", "Owner": "QA"},
-#                 "vpc_security_group_ids": ["sg-12345678"]
-#             },
-#             "after_unknown": {"arn": True, "id": True, "private_ip": True, "public_ip": True}
-#         },
-#         "after_sensitive": {},
-#         "before_sensitive": {}
-#     }
-# ]
+    def register_PR_tools(self):
+        LLM_PR_TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_drifted_prs",
+                "description": "Retrieve a list of open pull requests filtered by labels to check for existing drift PRs.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string", "description": "The GitHub repository name (e.g., 'my-repo')"},
+                        "token": {"type": "string", "description": "GitHub personal access token for authentication"},
+                        "owner": {"type": "string", "description": "The GitHub repository owner or organization (e.g., 'my-org')"},
+                        "labels": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of labels to filter PRs"
+                        }
+                    },
+                    "required": ["repo", "token", "labels", "owner"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "stage_change",
+                "description": "Stage files for commit in the specified repository directory.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo_dir": {"type": "string", "description": "Path to the local repository"},
+                        "files": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of file paths to stage"
+                        }
+                    },
+                    "required": ["repo_dir", "files"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "commit_change",
+                "description": "Commit staged changes in the repository with a message.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo_dir": {"type": "string", "description": "Path to the local repository"},
+                        "message": {"type": "string", "description": "Commit message"}
+                    },
+                    "required": ["repo_dir", "message"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "push_change",
+                "description": "Push a branch to the remote repository, setting upstream if needed.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo_dir": {"type": "string", "description": "Path to the local repository"},
+                        "branch": {"type": "string", "description": "Branch name to push"}
+                    },
+                    "required": ["repo_dir", "branch"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "find_main_branch",
+                "description": "Find the current branch of the repository (usually 'main' or 'master').",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo_dir": {"type": "string", "description": "Path to the local repository"}
+                    },
+                    "required": ["repo_dir"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "find_repo_name_and_owner",
+                "description": "Return the GitHub repository owner and name from the local repository remote URL.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo_dir": {"type": "string", "description": "Path to the local repository"}
+                    },
+                    "required": ["repo_dir"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "create_branch",
+                "description": "Create a new branch from a base branch and pull the latest changes.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo_dir": {"type": "string", "description": "Path to the local repository"},
+                        "base_branch": {"type": "string", "description": "Branch to base the new branch on"},
+                        "new_branch": {"type": "string", "description": "Name of the new branch"}
+                    },
+                    "required": ["repo_dir", "base_branch", "new_branch"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "delete_branch",
+                "description": "Delete a local branch in the specified repository directory.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo_dir": {"type": "string", "description": "Path to the local repository"},
+                        "branch": {"type": "string", "description": "Name of the branch to delete"}
+                    },
+                    "required": ["repo_dir", "branch"]
+                }
+            }
+        }
+        ,
+        {
+            "type": "function",
+            "function": {
+                "name": "create_pr",
+                "description": "Create a pull request on GitHub.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string", "description": "Repository name"},
+                        "owner": {"type": "string", "description": "Repository owner or organization"},
+                        "token": {"type": "string", "description": "GitHub personal access token"},
+                        "title": {"type": "string", "description": "PR title"},
+                        "body": {"type": "string", "description": "PR description"},
+                        "head": {"type": "string", "description": "Branch containing the changes"},
+                        "base": {"type": "string", "description": "Branch to merge into, e.g., 'main'"}
+                    },
+                    "required": ["repo", "owner", "token", "title", "body", "head", "base"]
+                }
+            }
+        }
+    ]
+        return LLM_PR_TOOLS
 
 
-# inital_recommendations = llm.initial_recommendation(
-#     model=model,
-#     drift_scan=resource_drifts,
-#     watch=watch
-# )
 
-# print(f"Initial Recommendations:{inital_recommendations}")
 
-# refined_recommendations = llm.refine_recommendation(
-#     model=model,
-#     previous_response=inital_recommendations,
-#     prior_state_root_module={"resources": selected_prior_states}
-# )
-# print(f"Refined Recommendations:{refined_recommendations}")
-#print(drift_data.get('resource_drift', []))
-
-# formatted_prompt = llm.format_prompt_with_template(
-#     drift_data,
-#     watch=watch
-# )
-# response = llm.chat(model=model, messages=formatted_prompt)
-# print("LLM Response:")
-# print(response)
-
-#focus only on resource_changes key
-# changes = drift_data.get("resource_changes", [])
-# print(json.dumps(list(drift_data.keys()), indent=2))
-
-# print(f"Length of resource_changes: {len(drift_data.get('resource_changes', []))}")
-# print(f"Length of resource_drift: {len(drift_data.get('resource_drift', []))}")
-# exit(0)
-# print(changes[0])
-
-# for change in changes:
-#     print(change)
-#     exit(0)
-# print(drift_data["resource_changes"])
-# exit(0)
-# # Ensure drift_data is a dictionary before converting to list of items
-# if isinstance(drift_data, dict):
-#     drift_data = list(drift_data.items())
-# else:
-#     raise TypeError("drift_data must be a dictionary-like object containing key-value pairs.")
-
-# # loop through the drift data in chunks in size that can support various llm context sizes. eg qwen3-coder:latest
-# for i in range(0, len(drift_data), chunk_size):
-#     current_chunk = drift_data[i:i + chunk_size]
-#     current_chunk_dict = dict(current_chunk)  # Ensure it's a dict for JSON formatting
-#     formatted_prompt = llm.format_prompt_with_template(
-#         current_chunk=current_chunk_dict, 
-#         watch=watch, 
-#         previous_chunk=previous_chunks
-#     )
-#     response = llm.chat(model=model, messages=formatted_prompt)
-#     responses.append(response)
-
-#     if "chunk_incomplete: true" in response:
-#         #maintain the last 10 chunks in previous_chunks
-#         previous_chunks.extend(current_chunk)
-#         previous_chunks = previous_chunks[-10:]
-
-#     else:
-#         previous_chunks = []
-
-#     #print(f"Response for chunk {i//chunk_size + 1}:")
-#     #print(response)
-
-# print("All Responses:")
-# for resp in responses:
-#     print(resp)
