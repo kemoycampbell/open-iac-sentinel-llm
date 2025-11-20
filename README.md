@@ -26,6 +26,8 @@ Infrastructure drift occurs when the actual state of infrastructure diverges fro
 
 
 # Warning
+This is a active project and is under heavy development.
+
 This project is currently a proof-of-concept to understand the capabilities of LLMs in the context of Infrastructure-as-Code drift detection and remediation. As it stands, it is not production-ready and should not
 be used in production environments.
 
@@ -63,7 +65,7 @@ The architecture of OpenSentinel consists of the following key components:
    ```
 4. Create and configure .env file with your LLM API keys and other sensitive information.
    ```bash
-    cp .env.example .env
+    cp env.example .env
     ```
 
 4. Update `config.yaml` with your settings. You should specify:

@@ -10,7 +10,7 @@ watch:
   environments:
     - name: production
       paths:
-        - C:/Users/kscics/Desktop/engineering-cloud-software-system/docker-wp
+        - <absolute_path_to_your_terraform_repository>
       resources:
         includes:
           - aws_instance.web_server

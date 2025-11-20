@@ -7,3 +7,4 @@ config.yaml
 llm_response*
 response.txt
 .llmvenv/
+llm_response_debug.txt
