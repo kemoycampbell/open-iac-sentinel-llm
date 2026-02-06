@@ -37,7 +37,7 @@ iac_drift_pr_expert:
 
       STATE RULES:
       - After each tool call, check the tool result in the conversation history.
-      - If the result contains "status": "ok" or valid output, mark that step as complete.
+      - A tool step is complete if all required output fields for that step are present and valid.
       - Then call the NEXT tool in the sequence.
       - Do NOT call that tool again once marked complete.
       - If all steps are complete, STOP and return nothing else.
