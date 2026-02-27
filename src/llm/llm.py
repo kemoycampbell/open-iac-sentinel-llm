@@ -104,6 +104,7 @@ class LLM:
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.id,
+                "tool_name": name,
                 "content": json.dumps(result, indent=2)
             })
 
@@ -150,7 +151,7 @@ class LLM:
         while True:
             message, tool_calls = self.chat(model=model, messages=prompt, tools=tools)
             #print("LLM Message:", message)
-
+            prompt.append(message)
             # No more tool calls? return the LLM's final response
             if not tool_calls:
                 return message.content
@@ -199,6 +200,7 @@ class LLM:
             )
             message = response.choices[0].message
             tool_calls = getattr(message, "tool_calls", None)
+            print(tool_calls)
             return message, tool_calls
         
         response = self.client.chat.completions.create(

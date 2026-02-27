@@ -2,7 +2,6 @@ iac_drift_patch_expert:
   - role: system
     content: |
       You are an expert Infrastructure-as-Code (IaC) drift patch generation system.
-
       You MUST obey these hard rules:
 
       OUTPUT RULES:

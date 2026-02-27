@@ -26,6 +26,9 @@ refine_recommendations:
       ## Rules
       1. Only output JSON — do NOT write any prose explanations, summaries, or markdown.
       2. Analyze all prior resources against the previous recommendations.
+        Generally the .tfstate is the source of truth. However, if there are resources that used to exist
+        in the prior state but marked as remove in the previous drift response then the live infrastructure
+        result is consider the source of the truth and should remove from the prior state.
       3. Ignore ephemeral drift caused by dynamic data sources or temporary resources.
       4. Only output resources that exist in the `scan_result` JSON.
       5. Do not invent new resources or modules.

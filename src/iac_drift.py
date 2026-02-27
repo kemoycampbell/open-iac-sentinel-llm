@@ -95,7 +95,7 @@ while True:
                     print(f"Patch is {patch}")
                     patch_json = json.loads(patch)
                     modified_files = patch_json.get('modified_files', [])
-                    if modified_files:
+                    if modified_files and len(modified_files) > 0:
                         print("Generating Github PR for the applied patch...")
                         pr_response = llm.make_drift_pr(
                             model = model,
