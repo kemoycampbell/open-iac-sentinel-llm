@@ -4,6 +4,9 @@ OpenSentinel is an open-source LLM-powered agent designed to detect and remediat
 # Rationale
 Infrastructure drift occurs when the actual state of infrastructure diverges from the declared state in IaC configurations. This can lead to inconsistencies, security vulnerabilities, and operational issues. OpenSentinel aims to automate the detection and remediation of such drifts using advanced language models, reducing manual effort and improving infrastructure reliability.
 
+# Drift Categories
+[Drift categories](./drift_categories.md)
+
 # Features
 - **Configurable**: Easily configurable rules, preferred LLM model, repository to monitor and more via config.yaml
 - **Drift Detection**: Analyze Terraform state files to identify configuration drifts between declared and actual(live) infrastructure.
