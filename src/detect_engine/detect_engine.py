@@ -1,11 +1,19 @@
 import subprocess
 import json
+import shutil
 
 class DriftDectionEngine:
     #TODO remove none
     def __init__(self, paths:dict = None, terraform_variant:str = "tofu"):
         self.paths = paths
         self.terraform_variant = terraform_variant
+
+        #correct variant behavior if tflocal is used
+        if self.terraform_variant == "tflocal":
+            tflocal_path = shutil.which("tflocal")
+            if tflocal_path is None:
+                raise ValueError("tflocal is not installed or not found in PATH. Please install terraform-local and ensure it's in your system PATH.")
+            self.terraform_variant = tflocal_path
     
     def run_all_paths_terraform_plan(self):
         results = {}
@@ -51,7 +59,7 @@ class DriftDectionEngine:
         output_plan_file = "tfplan_detect"
         # run the plan with --detailed-exitcode to capture changes and --refresh=true to detect drift
         output_plan_args = f"-out={output_plan_file}"
-        command = [self.terraform_variant, "plan", "-detailed-exitcode", "-refresh=true", output_plan_args,"-no-color"]
+        command = f"{self.terraform_variant} plan -detailed-exitcode -refresh=true {output_plan_args} -no-color"
         plan = subprocess.run(
             command,
             cwd=path,
@@ -64,7 +72,8 @@ class DriftDectionEngine:
         
         
         #show plan as json
-        command = [self.terraform_variant, "show", "-json", output_plan_file]
+        #command = [self.terraform_variant, "show", "-json", output_plan_file]
+        command = f"{self.terraform_variant} show -json {output_plan_file}"
         show_process = subprocess.run(
             command,
             cwd=path,
@@ -77,7 +86,8 @@ class DriftDectionEngine:
         return json.loads(show_process.stdout)
 
     def refresh_terraform_state(self, path:str):
-        command = [self.terraform_variant, "refresh", "-no-color"]
+        #command = [self.terraform_variant, "refresh", "-no-color"]
+        command = f"{self.terraform_variant} refresh -no-color"
         refresh = subprocess.run(
             command,
             cwd=path,

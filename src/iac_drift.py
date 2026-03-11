@@ -21,7 +21,9 @@ drift_interval = config.drift_detection.get('interval_seconds')
 
 #Drift detction engine
 paths = watch.get('environments')
-drift_detection_engine = DriftDectionEngine(paths=paths, terraform_variant="terraform")
+terraform_variant = config.terraform_variant
+print("The variant of terraform being used is:", terraform_variant)
+drift_detection_engine = DriftDectionEngine(paths=paths, terraform_variant=terraform_variant)
 
 #llm config
 model = config.llm.get('model')
