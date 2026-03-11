@@ -136,4 +136,8 @@ class Config:
     def llm_api_key(self) -> str:
         env_key = self.llm.get('api_key_env_var')
         return os.getenv(env_key)
+    
+    @property
+    def terraform_variant(self) -> str:
+        return self._config.get('terraform').get('variant')
 
