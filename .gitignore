@@ -8,3 +8,7 @@ llm_response*
 response.txt
 .llmvenv/
 llm_response_debug.txt
+volume/*
+*/sentinel_logs/*
+sentinel_logs/
+logs/*

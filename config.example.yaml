@@ -29,3 +29,4 @@ drift_detection:
 output:
   log_level: info
   log_file: /var/log/drift_detection.log
+  failure_log_file: /var/log/drift_detection_failures.log

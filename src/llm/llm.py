@@ -74,15 +74,15 @@ class LLM:
             execute_calls_ids.add(key)
             execute_step.add(name)
 
-            # --- DEBUGGING: show model's tool call request ---
-            print(f"\n=== TOOL CALL {i+1} ===")
-            print(f"Tool ID: {call.id}")
-            print(f"Tool Name: {name}")
-            print(f"Tool Args: {args}")
-            print("\nCurrent messages before tool execution:")
-            for msg in messages:
-                print(msg)
-            print("\n---------------------------\n")
+            #debug
+            # print(f"\n=== TOOL CALL {i+1} ===")
+            # print(f"Tool ID: {call.id}")
+            # print(f"Tool Name: {name}")
+            # print(f"Tool Args: {args}")
+            # print("\nCurrent messages before tool execution:")
+            # for msg in messages:
+            #     print(msg)
+            # print("\n---------------------------\n")
 
             # map tools to actual functions
             func = tool_maps.get(name)
@@ -96,9 +96,9 @@ class LLM:
             else:
                 result = {"error": "Tool not recognized."}
 
-            # --- DEBUGGING: show tool execution result ---
-            print(f"Tool Execution Result for {name}:")
-            print(json.dumps(result, indent=2))
+            #Debug
+            # print(f"Tool Execution Result for {name}:")
+            # print(json.dumps(result, indent=2))
 
             # append tool result with proper tool_call_id
             messages.append({
@@ -108,10 +108,10 @@ class LLM:
                 "content": json.dumps(result, indent=2)
             })
 
-            # --- DEBUGGING: show what the model sees after tool append ---
-            print(f"Tool message appended to messages for {name}:")
-            print(messages[-1])
-            print("\n===========================\n")
+            #debug
+            # print(f"Tool message appended to messages for {name}:")
+            # print(messages[-1])
+            # print("\n===========================\n")
         return messages
 
             
@@ -160,34 +160,57 @@ class LLM:
 
     
     
-    def fix_drift_patch(self, model, recommendation, directory:str):
-        placeholders = {
-            "recommendation": recommendation,
-            "directory": directory
-        }
-        tools = self.register_tools()
-        prompt = self.format_prompt_with_template("iac_drift_patch_expert", placeholders)
 
-        executed_call_ids = set()  # Keep track of executed tool call IDs
-        executed_steps = set()
+    def fix_drift_patch(self, model, llm_patch_context:dict):
+            placeholders = {
+                "llm_patch_context": llm_patch_context
+            }
+            tools = self.register_tools()
+            prompt = self.format_prompt_with_template("iac_drift_patch_expert", placeholders)
 
-        #tool mapping
-        tool_maps = {
-            "discover_terraform_files": discover_terraform_files,
-            "read_file": read_file,
-            "write_file": write_file
-        }
+            executed_call_ids = set()  # Keep track of executed tool call IDs
+            executed_steps = set()
 
-        while True:
-            message, tool_calls = self.chat(model=model, messages=prompt, tools=tools)
-            print("\n\nLLM Message all :", message)
+            #tool mapping
+            tool_maps = {
+                "read_file": read_file,
+                "write_file": write_file
+            }
 
-            # No more tool calls? return the LLM's final response
-            if not tool_calls:
-                return message.content
+            #sorta wanna prevent a run away model
+            MAX_STEPS = 10
+            steps = 0                    
 
-            # Execute all tool calls
-            prompt = self.execute_tool_calls(tool_calls, tool_maps, executed_call_ids, executed_steps, prompt)
+            while True:
+                steps += 1                    
+                if steps > MAX_STEPS:         
+                    raise RuntimeError("LLM did not produce final patch JSON")
+
+                message, tool_calls = self.chat(
+                    model=model,
+                    messages=prompt,
+                    tools=tools
+                )
+
+                
+                if tool_calls:
+                    prompt = self.execute_tool_calls(
+                        tool_calls,
+                        tool_maps,
+                        executed_call_ids,
+                        executed_steps,
+                        prompt
+                    )
+                    continue                 
+                
+                # fix where the model sometime ends too early so we checks if the content is the final JSON we expect or if its just the model response before calling the tool. If its not the final JSON we expect we continue the loop and ask the model to try again.
+                content = (message.content or "").strip()   
+
+                if content.startswith("{") and "modified_files" in content:
+                    return content            
+
+                prompt.append(message)          
+
 
     
     def chat(self, model, messages, tools: list = None, tool_choice:str="required"):
@@ -200,7 +223,7 @@ class LLM:
             )
             message = response.choices[0].message
             tool_calls = getattr(message, "tool_calls", None)
-            print(tool_calls)
+            # print(tool_calls)
             return message, tool_calls
         
         response = self.client.chat.completions.create(
@@ -209,23 +232,9 @@ class LLM:
         )
         return response.choices[0].message.content
     
-    # fixed: add self to method definition
+    
     def register_tools(self):
         return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "discover_terraform_files",
-                    "description": "Scan directory for Terraform resource definitions and return mapping",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "directory": {"type": "string", "description": "Path to directory to scan"}
-                        },
-                        "required": ["directory"]
-                    }
-                }
-            },
             {
                 "type": "function",
                 "function": {
