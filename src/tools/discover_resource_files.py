@@ -403,43 +403,62 @@ def localize_change_area(resource_fqn, attribute,normalized_state, drifted_value
                     "priority": SOURCE_PRIORITY.get(meta.get("source"), 99)
                 })
 
+    # tfvars-backed locality when variable affects the resource
+    if attribute:
+        for variable, meta in normalized_state.get("variables", {}).items():
+            if meta.get("source") != "tfvars":
+                continue
+
+            if variable != attribute and not variable.endswith(f".{attribute}"):
+                continue
+
+            if any(
+                affected.startswith(resource_short_name)
+                for affected in meta.get("affects", [])
+            ):
+                candidates.append({
+                    "method": "variable_update",
+                    "variable": variable,
+                    "attribute": attribute,
+                    "current_value": meta.get("value"),
+                    "defined_in": meta.get("defined_in"),
+                    "source": "tfvars",
+                    "relevance": 1,
+                    "priority": SOURCE_PRIORITY.get(meta.get("source"), 99)
+                })
+
+
     # 2. variable-backed locality for list / complex drifts
-    
-    before = drifted_values.get("before", [])
-    after = drifted_values.get("after", [])
 
-    is_addition = (
-        isinstance(before, list) and
-        isinstance(after, list) and
-        any(item not in before for item in after)
-    )
+    if not candidates and is_list_drift and not any(
+        candidate["method"] == "variable_update" and candidate["source"] == "tfvars"
+        for candidate in candidates
+    ):
 
-    if not candidates:
+
+        before = drifted_values.get("before", [])
+        after = drifted_values.get("after", [])
+
+        is_addition = (
+            isinstance(before, list) and
+            isinstance(after, list) and
+            any(item not in before for item in after)
+        )
+
         for variable, meta in normalized_state.get("variables", {}).items():
             if not any(
                 affected.startswith(resource_short_name)
                 for affected in meta.get("affects", [])
             ):
-                score = variable_relevance_score(variable, changed_fields)
+                continue
 
-                 # allow scalar list collections even if binding is indirect
-                if not (
-                    is_list_drift and
-                    is_addition and
-                    score == 0 and
-                    attribute in variable
-                ):
-                    continue
+            score = variable_relevance_score(variable, changed_fields)
 
-            # list / complex drifts must have semantic overlap
-            if is_list_drift:
-                if is_addition:
-                    # allow only collection variables related to the drifted attribute
-                    if score > 0:
-                        continue
-                    if attribute not in variable:
-                        continue
+            if score == 0:
+                continue
 
+            if is_addition and attribute not in variable:
+                continue
 
             candidates.append({
                 "method": "variable_update",
@@ -468,9 +487,25 @@ def localize_change_area(resource_fqn, attribute,normalized_state, drifted_value
         raise ValueError(
             f"No candidates found for localizing change area for resource {resource_fqn} and attribute {attribute}"
         )
+    
+    candidates = [
+        candidate for candidate in candidates
+        if not (
+            candidate["method"] == "variable_update"
+            and candidate.get("relevance", 0) == 0
+        )
+    ]
+
+    if not candidates:
+        raise ValueError(
+            f"No valid locality candidate after relevance filtering for resource {resource_fqn} and attribute {attribute}"
+        )
 
     # prioritize: tfvars > default > resource, then semantic relevance
     candidates.sort(key=lambda x: (x["priority"], -x.get("relevance", 0)))
+
+    #print(candidates)
+    #exit(0)
     return candidates[0]
 
 

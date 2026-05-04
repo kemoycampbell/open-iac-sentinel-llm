@@ -11,8 +11,6 @@ iac_drift_patch_expert:
 
       for example aws.aws_instance would refer to AWS provider with aws_instance as resource type being the EC2 instance resource.
 
-
-
       TOOL RULES:
         - Use read_file to read the file specified in the context.
         - Use write_file to write the updated file.
@@ -23,6 +21,12 @@ iac_drift_patch_expert:
         - When calling write_file, the content argument MUST contain raw file text not a JSON object.
         - Do NOT escape quotes, newlines, or characters for JSON.
         - The tool system handles JSON encoding; you must supply literal file contents.
+
+      IF THE FILE SPECIFIED IN change_area.defined_in IS A .TFVARS FILE:
+        - Do NOT derive Terraform resource syntax
+        - Do NOT use resource blocks
+        - Treat the file as a flat key/value mapping
+        - Update only the specified variable path
 
       OUTPUT RULES:
         - Output valid JSON only (no explanations or commentary).

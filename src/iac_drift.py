@@ -60,8 +60,12 @@ while True:
     stage = "scan_terraform_plan"
     environment = "unknown"
     path = "unknown"
+    patch_context = None
+    drifts = None
+    recommendation_log = None
 
     try:
+        stage = "Running all terraform path scans"
         scans = drift_detection_engine.run_all_paths_terraform_plan()
         #print(f"Drift detection scans: {scans}")
         for environment in scans:
@@ -69,6 +73,7 @@ while True:
                 print(f"Drift scan results for environment '{environment}' at path '{path}':")
                 print("\n\n")
                 plan_output_json = scans[environment][path]
+                stage = "getting_drifted_resources"
                 print("Plan output json scanned")
                 drifts = drift_detection_engine.get_drifted_resources(plan_output_json)
                 print(f"Drifted resources for environment '{environment}' at path '{path}':")
@@ -77,13 +82,15 @@ while True:
                 #skipping drifts that are already patched
                 print("Filtering out drifts that are already patched...")
                 drifts = [drift for drift in drifts if not logger.is_patch_exist(path, model,drift)]
+                stage = "filtering_already_patched_drifts"
                 print(f"Drifts after filtering already patched ones for environment '{environment}' at path '{path}':")
                 print(drifts)
 
                 if not drifts or len(drifts) == 0:
                     print(f"No new drifts detected for environment '{environment}' at path '{path}'.")
                     continue
-
+                
+                stage = "generating_recommendations"
                 print("Generating recommendations...")
                 recommendations = llm.initial_recommendation(
                     model=model,
@@ -93,9 +100,13 @@ while True:
                 print(f"Recommendations for environment '{environment}' at path '{path}':")
                 print(recommendations)
 
+                
+
 
                 recommendations_list = yaml.safe_load(recommendations)
                 for drift, recommendation in zip(drifts, recommendations_list):
+                    stage = "processing_recommendation"
+                    recommendation_log = recommendation
                     if recommendation.get('fix_type') == 'code_patch':
                         #get the resources map
                         stage="discovering_terraform_files"
@@ -112,22 +123,37 @@ while True:
                         stage="building_llm_patch_context"
                         patch_context = build_llm_patch_context(recommendation, drift,resource_map_simplified)
                         print(f"LLM Patch Context for resource {recommendation.get('resource_name')}: {patch_context}")
-                        #exit(0)
 
                         print(f"Generating code update patch for {environment} at path {path}...")
                         stage="generating_code_patch"
                         patch = llm.fix_drift_patch(model=model, llm_patch_context=patch_context)
                         print(f"Generated Patch File(s): {patch}")
-
-                        #refresh the terraform after applying the patch
-                        print(f"Applying generated patch to files...")
-                        stage="refreshing_terraform_state"
-                        refresh_resource = components.get('resource_full_name')
-                        refresh_result = drift_detection_engine.refresh_terraform_state(path, refresh_resource)
                         
-
-                        #did we get a error?
-                        if refresh_result.get("status")=="error":
+                        #print(f"Patch is {patch}")
+                        patch_json = json.loads(patch)
+                        modified_files = patch_json.get('modified_files', [])
+                        if modified_files and len(modified_files) > 0:
+                            #refresh the terraform after applying the patch
+                            print(f"Applying generated patch to files...")
+                            stage="refreshing_terraform_state"
+                            refresh_resource = components.get('resource_full_name')
+                            refresh_result = drift_detection_engine.refresh_terraform_state(path, refresh_resource)
+                            
+                            #did we get a error?
+                            if refresh_result.get("status")=="error":
+                                logger.log_drift_event(
+                                    environment=environment,
+                                    path=path,
+                                    model=model,
+                                    resource=recommendation.get('resource_name'),
+                                    attribute=patch_context["change_area"]["attribute"],
+                                    patch_context=patch_context,
+                                    correct_method=patch_context["change_area"]["method"],
+                                    opensentinel_method="terraform_refresh",
+                                    refresh_clean=False
+                                )
+                                raise RuntimeError(f"Error occurred during terraform refresh: {refresh_result.get('stderr')}")
+                            #log the patch as successful
                             logger.log_drift_event(
                                 environment=environment,
                                 path=path,
@@ -137,25 +163,8 @@ while True:
                                 patch_context=patch_context,
                                 correct_method=patch_context["change_area"]["method"],
                                 opensentinel_method="terraform_refresh",
-                                refresh_clean=False
+                                refresh_clean= True
                             )
-                            raise RuntimeError(f"Error occurred during terraform refresh: {refresh_result.get('stderr')}")
-                        #log the patch as successful
-                        logger.log_drift_event(
-                            environment=environment,
-                            path=path,
-                            model=model,
-                            resource=recommendation.get('resource_name'),
-                            attribute=patch_context["change_area"]["attribute"],
-                            patch_context=patch_context,
-                            correct_method=patch_context["change_area"]["method"],
-                            opensentinel_method="terraform_refresh",
-                            refresh_clean= True
-                        )
-                        #print(f"Patch is {patch}")
-                        patch_json = json.loads(patch)
-                        modified_files = patch_json.get('modified_files', [])
-                        if modified_files and len(modified_files) > 0:
                             print("Generating Github PR for the applied patch...")
                             stage="generating_github_pr"
                             pr_response = llm.make_drift_pr(
@@ -178,7 +187,6 @@ while True:
                             #logger.log_patch(log_drift)
 
                             print(f"PR Response: {pr_response}")
-
                 #we  already patched the changes in this environment so we can stash any local changes as we do not want to keep any local copies
                 #print(f"Stashing any local changes in environment '{environment}' at path '{path}'...")
                 #git_stash(path)
@@ -188,7 +196,10 @@ while True:
             path=path,
             model=model,
             stage=stage,
-            error=e
+            error=e,
+            llm_patch_context=patch_context,
+            recommendation=recommendation_log
+
         )
         print(f"Error occurred during drift detection orchestration at stage '{stage}': {e}")
     print(f"Waiting for {drift_interval} seconds before next drift check...")

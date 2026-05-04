@@ -3,7 +3,6 @@
 IGNORE_FIELDS = {
     "public_ip",
     "public_dns",
-    "tags",
     "tags_all",
     "timeouts",
     "metadata",
@@ -97,6 +96,11 @@ def collapse_list_diffs(diff):
     collapsed = {}
     for path, change in diff.items():
         parent = path.split("[", 1)[0]
+        # keep leaf diffs when parent diff doesnt exist (edge case - s3 versioning is where i first spot this)
+        if parent in parents and path!=parent and parent not in diff:
+            collapsed[path] = change
+            continue
+        
         if parent in parents and path != parent:
             continue
         collapsed[path] = change

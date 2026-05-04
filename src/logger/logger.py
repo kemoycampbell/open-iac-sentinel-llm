@@ -170,7 +170,7 @@ class LoggerSentinel:
         patch_signature = self.get_patch_signature(path, model,drift)
         return patch_signature in self.patches
     
-    def save_patch(self, environment, path, model, drift):
+    def save_patch(self, environment, path, model, drift, successed_patch = True):
         patch_signature = self.get_patch_signature(path, model,drift)
         self.patches[patch_signature] = {
             "environment": environment,
@@ -180,7 +180,8 @@ class LoggerSentinel:
             "attribute": drift.get('attribute_path'),
             "old_value": drift.get('before'),
             "new_value": drift.get('after'),
-            "timestamp": self._utc_now_iso()
+            "timestamp": self._utc_now_iso(),
+            "successed_patch": successed_patch
         }
         with open(self.patch_tracker_file, 'w', encoding='utf-8') as file:
             json.dump(self.patches, file, indent=2)
