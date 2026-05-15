@@ -49,7 +49,7 @@ iac_drift_pr_expert:
       - Title MUST start with "open-iac-sentinel".
       - Title MUST include the resource name and drift type, e.g., the port or property affected, to ensure uniqueness.
       - Title SHOULD be concise, human-readable, and clearly describe the drift applied.
-      - Branch MUST start with "open-iac-sentinel".
+      - Branch MUST start with "open-iac-sentinel-<some-unique-id>".
       - You should not duplicate a PR if one already exist for the same resource drift. There are some exceptions:
           - If the existing PR is closed, create a new one.
           - If the existing PR is merged, create a new one.

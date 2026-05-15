@@ -5,6 +5,10 @@ llm:
   endpoint: http://localhost:11434/v1
   api_key_env_var: LLM_API_KEY
 
+#terraform flavor
+terraform:
+  variant: terraform # options: works well with any terraform variants, I tested terraform, tofu, tflocal
+
 # Watch configuration
 watch:
   environments:
@@ -25,3 +29,4 @@ drift_detection:
 output:
   log_level: info
   log_file: /var/log/drift_detection.log
+  failure_log_file: /var/log/drift_detection_failures.log

@@ -222,3 +222,24 @@ def create_pr(repo: str, token: str, owner: str, title: str, body: str, head: st
         return {"status": "success", "pr_url": pr_data['html_url']}
     else:
         return {"status": "error", "message": response.json()}
+
+def git_stash(repo_dir: str):
+    cwd = os.getcwd()
+    try:
+        os.chdir(repo_dir)
+        result = subprocess.run(["git", "stash"], capture_output=True, text=True)
+        return {
+            "stash_result_code": result.returncode,
+            "output": result.stdout.strip(),
+            "error": result.stderr.strip()
+        }
+
+    except subprocess.CalledProcessError as e:
+        return {
+            "error": f"Git stash failed: {e.cmd} with returncode {e.returncode}",
+            "output": e.output,
+            "stderr": e.stderr
+        }
+
+    finally:
+        os.chdir(cwd)
